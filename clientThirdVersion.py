@@ -519,10 +519,15 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Perform login
-    student_id = input("Enter student ID (username): ").strip()
-    if not client.login(student_id):
-        client.close()
-        sys.exit(1)
+    while True:
+        print("Logging in...")
+        student_id = input("Enter student ID (username): ").strip()
+        if student_id == "":
+            print("Invalid student ID, please enter again")
+            continue
+        if client.login(student_id):
+            break
+        print("Login failed. Please try again.")
 
     # Get valid file path from user
     file_path = None
