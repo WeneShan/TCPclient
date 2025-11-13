@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 添加项目路径到系统路径
-project_path = Path("/home/stepuser/STEP-Project/")
+project_path = Path("/home/stepuser/TCPclient/")
 sys.path.insert(0, str(project_path))
 
 from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results

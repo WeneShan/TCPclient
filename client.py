@@ -207,9 +207,9 @@ class AuthenticationService:
         return self.token
 
 
-# 文件块处理模块，负责多进程文件读取和索引计算
+# 文件块处理模块，负责单线程文件读取和索引计算
 class FileBlockProcessor:
-    """Handles file block processing including multi-process reading and index calculation"""
+    """Handles file block processing including single-thread reading and index calculation"""
 
     @staticmethod
     def calculate_indices(process_num, total_blocks):
@@ -237,15 +237,15 @@ class FileBlockProcessor:
         return start_indices, end_indices
 
     @staticmethod
-    def read_blocks(queue, start_idx, end_idx, block_size, file_path, file_size):
+    def read_blocks_single_thread(start_idx, end_idx, block_size, file_path, file_size):
         """
-        Read file blocks in a separate process and put them into a queue
-        :param queue: Queue for storing read blocks
-        :param start_idx: Starting block index
-        :param end_idx: Ending block index
-        :param block_size: Size of each block
-        :param file_path: Path to the file to read
-        :param file_size: Total size of the file
+        单线程读取文件块
+        :param start_idx: 起始块索引
+        :param end_idx: 结束块索引
+        :param block_size: 块大小
+        :param file_path: 文件路径
+        :param file_size: 文件总大小
+        :return: 包含块索引和数据的生成器
         """
         with open(file_path, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mapped_file:
@@ -254,7 +254,7 @@ class FileBlockProcessor:
                     remaining = file_size - block_idx * block_size
                     chunk_size = min(block_size, remaining)
                     data = mapped_file.read(chunk_size)
-                    queue.put((block_idx, data))
+                    yield (block_idx, data)
 
 
 # 进度条工具类，实现单行动态刷新
@@ -309,6 +309,7 @@ class FileTransferService:
         self.file_key = ""
         self.file_size = 0
         self.file_name = ""
+        self.file_path = ""  # 新增：存储文件路径用于计算MD5
 
     def get_upload_plan(self, file_path, custom_key=None):
         """
@@ -317,6 +318,7 @@ class FileTransferService:
         :param custom_key: Optional custom file key
         :return: True if plan retrieved successfully, False otherwise
         """
+        self.file_path = file_path  # 保存文件路径
         self.file_name = custom_key or os.path.basename(file_path)
         self.file_size = os.path.getsize(file_path)
 
@@ -350,89 +352,93 @@ class FileTransferService:
         self.block_size = response[FIELD_BLOCK_SIZE]
         return True
 
+    @staticmethod
+    def calculate_local_md5(file_path, block_size=8192):
+        """计算本地文件的MD5值"""
+        md5_hash = hashlib.md5()
+        with open(file_path, "rb") as f:
+            # 分块读取文件计算MD5，避免大文件占用过多内存
+            while chunk := f.read(block_size):
+                md5_hash.update(chunk)
+        return md5_hash.hexdigest()
+
     def upload_file(self, file_path, process_num=3):
         """
-        Upload file using multiple processes for reading with dynamic progress bar
+        单线程上传文件，使用生成器逐块读取文件
         :param file_path: Path to the file to upload
-        :param process_num: Number of processes to use for reading
+        :param process_num: 保留参数，用于兼容接口（实际使用单线程）
         """
-        queue = Queue()
         start_time = time.time()
-        processes = []
 
-        # Calculate block indices for each process
-        start_indices, end_indices = FileBlockProcessor.calculate_indices(
-            process_num, self.total_blocks
+        # 使用单线程读取所有块
+        block_generator = FileBlockProcessor.read_blocks_single_thread(
+            0, self.total_blocks - 1, self.block_size, file_path, self.file_size
         )
 
-        # Start worker processes
-        for i in range(1, process_num + 1):
-            process = Process(
-                target=FileBlockProcessor.read_blocks,
-                args=(queue, start_indices[f'process_{i}'], end_indices[f'process_{i}'],
-                      self.block_size, file_path, self.file_size)
-            )
-            process.start()
-            processes.append(process)
+        # 上传块数据
+        self._upload_blocks_from_generator(block_generator, start_time)
 
-        # Upload blocks from queue with progress bar
-        self._upload_blocks_from_queue(queue, start_time)
-
-        # Wait for all processes to complete
-        for process in processes:
-            process.join()
-
-    def _upload_blocks_from_queue(self, queue, start_time):
+    def _upload_blocks_from_generator(self, block_generator, start_time):
         """
-        Upload file blocks from queue with retransmission on timeout and dynamic progress bar
-        :param queue: Queue containing file blocks
-        :param start_time: Timestamp when upload started
+        从生成器上传文件块，支持超时重传和动态进度条
+        :param block_generator: 生成器，产生(block_index, data)元组
+        :param start_time: 上传开始时间戳
         """
         blocks_uploaded = 0
         last_server_msg = ""  # 存储最后一条服务器响应，避免频繁打印
 
-        while blocks_uploaded < self.total_blocks:
-            if not queue.empty():
-                block_index, bin_data = queue.get()
-                payload = {
-                    FIELD_KEY: self.file_key,
-                    FIELD_BLOCK_INDEX: block_index
-                }
+        for block_index, bin_data in block_generator:
+            payload = {
+                FIELD_KEY: self.file_key,
+                FIELD_BLOCK_INDEX: block_index
+            }
 
-                # Handle retransmission
-                while True:
-                    try:
-                        NetworkManager.send_message(
-                            self.socket, OP_UPLOAD, TYPE_FILE, payload,
-                            bin_data=bin_data, token=self.auth_service.get_token()
-                        )
-                        self.socket.settimeout(RE_TRANSMISSION_TIME)
+            # 处理重传
+            while True:
+                try:
+                    NetworkManager.send_message(
+                        self.socket, OP_UPLOAD, TYPE_FILE, payload,
+                        bin_data=bin_data, token=self.auth_service.get_token()
+                    )
+                    self.socket.settimeout(RE_TRANSMISSION_TIME)
 
-                        response, _ = NetworkManager.unpack_message(self.socket)
-                        if not response:
-                            raise socket.timeout("No response received")
+                    response, _ = NetworkManager.unpack_message(self.socket)
+                    if not response:
+                        raise socket.timeout("No response received")
 
-                        status_code = response.get(FIELD_STATUS)
-                        ErrorHandler.check_error(response, status_code, self.socket)
-                        last_server_msg = f"Server response: {response[FIELD_STATUS_MSG]} (Code: {status_code})"
-                        break
-                    except socket.timeout:
-                        print(f"\nRetransmitting block {block_index} (timeout)")
-                        ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)  # 重传时更新进度条
-
-                # Update progress bar
-                blocks_uploaded += 1
-                ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)
-
-                # Check for completion (MD5 received)
-                if FIELD_MD5 in response:
-                    print(f'\n\nFile Upload Completed!')
-                    print(f'File MD5: {response[FIELD_MD5]}')
-                    print(f'Total Upload Time: {time.time() - start_time:.2f} seconds')
-                    print(last_server_msg)
+                    status_code = response.get(FIELD_STATUS)
+                    ErrorHandler.check_error(response, status_code, self.socket)
+                    last_server_msg = f"Server response: {response[FIELD_STATUS_MSG]} (Code: {status_code})"
                     break
+                except socket.timeout:
+                    print(f"\nRetransmitting block {block_index} (timeout)")
+                    ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)  # Update the progress bar when retransmitting.
 
-        # Print final server message if not printed during completion
+            # 更新进度条
+            blocks_uploaded += 1
+            ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)
+
+            # 检查是否完成（收到MD5）
+            if FIELD_MD5 in response:
+                # calculate local MD5 in order to compare with server
+                local_md5 = self.calculate_local_md5(self.file_path)
+                server_md5 = response[FIELD_MD5]
+
+                print(f'\n\nFile Upload Completed!')
+                print(f'Local file MD5:  {local_md5}')
+                print(f'Server file MD5: {server_md5}')
+
+                # compare MD5 from  server
+                if local_md5 == server_md5:
+                    print("MD5 verification succeeded - file transfer is intact")
+                else:
+                    print("WARNING: MD5 verification failed - file may be corrupted during transfer")
+
+                print(f'Total Upload Time: {time.time() - start_time:.2f} seconds')
+                print(last_server_msg)
+                break
+
+        # 如果没有在循环中打印完成信息，则打印最后的服务器消息
         if FIELD_MD5 not in locals().get('response', {}):
             print(f'\n{last_server_msg}')
 
@@ -519,10 +525,15 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Perform login
-    student_id = input("Enter student ID (username): ").strip()
-    if not client.login(student_id):
-        client.close()
-        sys.exit(1)
+    while True:
+        print("Logging in...")
+        student_id = input("Enter student ID (username): ").strip()
+        if student_id == "":
+            print("Invalid student ID, please enter again")
+            continue
+        if client.login(student_id):
+            break
+        print("Login failed. Please try again.")
 
     # Get valid file path from user
     file_path = None

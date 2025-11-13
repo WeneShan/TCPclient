@@ -120,7 +120,7 @@ class VMFileManager:
         hash_md5 = hashlib.md5()
         try:
             with open(filepath, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
+                for chunk in iter(lambda: f.read(1024*1024), b""):
                     hash_md5.update(chunk)
             return hash_md5.hexdigest()
         except Exception as e:
@@ -170,8 +170,8 @@ class VMNetworkTester:
         client_cmd = [
             "python3", 
             str(Path(VMTestConfig.PROJECT_PATH) / "client.py"),
-            # "--ip", VMTestConfig.SERVER_IP,
-            # "--port", str(VMTestConfig.SERVER_PORT)
+             # "--ip", VMTestConfig.SERVER_IP,
+             # "--port", str(VMTestConfig.SERVER_PORT)
         ]
         
         try:
@@ -191,8 +191,8 @@ class VMNetworkTester:
                 stderr=subprocess.PIPE,
                 text=True
             )
-            
             stdout, stderr = process.communicate(input=input_data, timeout=300)  # 5分钟超时
+            print(stdout)
             end_time = time.time()
             
             return {
@@ -240,10 +240,10 @@ def verify_file_integrity_vm(local_md5, stdout):
         lines = stdout.splitlines()
         for line in lines:
             # 寻找以"File MD5:"开头的行（忽略前后空格）
-            if line.strip().startswith("File MD5: "):
+            if line.strip().startswith("Server file MD5:"):
                 # 分割冒号，取后面的部分并去除首尾空格（处理可能的空格）
                 server_md5 = line.split(":", 1)[1].strip()
-            
+        print(server_md5)
         if local_md5 and server_md5 and local_md5 == server_md5:
             return True, local_md5, server_md5
         else:

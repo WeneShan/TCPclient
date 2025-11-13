@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 添加项目路径到系统路径
-project_path = Path("/home/stepuser/STEP-Project/")
+project_path = Path("/home/stepuser/TCPclient/")
 sys.path.insert(0, str(project_path))
 
 from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results, verify_file_integrity_vm
@@ -75,7 +75,7 @@ def main():
         
         # 验证文件完整性
         logger.info("验证文件完整性...")
-        is_valid, server_md5_calc, client_md5_calc = verify_file_integrity_vm("test_10mb.bin")
+        is_valid, server_md5_calc, client_md5_calc = verify_file_integrity_vm(local_md5, test_result['stdout'])
         
         # 记录测试用例结果
         test_case = {

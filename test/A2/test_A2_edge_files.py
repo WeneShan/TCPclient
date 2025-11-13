@@ -11,17 +11,19 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# 添加上级目录到路径以便导入test_utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test.vm_test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
+# 添加项目路径到系统路径
+project_path = Path("/home/stepuser/TCPclient/")
+sys.path.insert(0, str(project_path))
+
+from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results, verify_file_integrity_vm
 
 def main():
     print("=== A2 测试：0字节和1字节文件上传 ===")
     
     # 初始化测试
     test_name = "A2"
-    logger = TestLogger(test_name)
-    client_tester = ClientTester(test_name)
+    logger = VMTestLogger(test_name)
+    # client_tester = VMClientTester(test_name)
     results = {
         'test_name': test_name,
         'test_description': '极小文件上传测试（0字节/1字节）',
@@ -30,19 +32,7 @@ def main():
     }
     
     try:
-        # 启动服务器
-        logger.info("启动服务器...")
-        server_process = ServerManager.start_server()
-        
-        if not server_process:
-            logger.error("服务器启动失败")
-            results['status'] = 'FAILED'
-            results['error'] = '服务器启动失败'
-            save_test_results(test_name, results)
-            return False
-            
-        logger.info("服务器启动成功")
-        
+
         # 测试案例
         test_cases = [
             {'file': 'empty_file.bin', 'type': '0字节', 'size': 0},
@@ -54,21 +44,21 @@ def main():
             
             # 创建测试文件
             if case['size'] == 0:
-                test_file = FileManager.create_empty_file(case['file'])
+                test_file = VMFileManager.create_empty_file(case['file'])
             else:  # 1字节
-                test_file = FileManager.create_1byte_file(case['file'])
+                test_file = VMFileManager.create_1byte_file(case['file'])
             
             if not test_file.exists():
                 logger.error(f"测试文件创建失败: {case['file']}")
                 continue
             
             # 计算本地文件MD5
-            local_md5 = FileManager.calculate_md5(test_file)
+            local_md5 = VMFileManager.calculate_md5(test_file)
             logger.info(f"本地文件MD5: {local_md5}")
             
             # 运行上传测试
             logger.info(f"开始上传 {case['type']} 文件...")
-            test_result = client_tester.run_upload_test(case['file'])
+            test_result = VMNetworkTester.run_client_upload(case['file'])
             
             if not test_result:
                 logger.error(f"上传测试执行失败: {case['file']}")
@@ -83,7 +73,7 @@ def main():
             
             # 验证文件完整性
             logger.info(f"验证 {case['type']} 文件完整性...")
-            is_valid, server_md5, client_md5 = client_tester.verify_file_integrity(case['file'])
+            is_valid, server_md5, client_md5 = VMNetworkTester.verify_file_integrity_vm(local_md5, test_result['stdout'])
             
             # 记录测试用例结果
             test_case = {
@@ -130,14 +120,11 @@ def main():
         results['error'] = str(e)
         
     finally:
-        # 停止服务器
-        if 'server_process' in locals() and server_process:
-            logger.info("停止服务器...")
-            ServerManager.stop_server(server_process)
+
         
         # 记录结束时间
         results['end_time'] = datetime.now().isoformat()
-        save_test_results(test_name, results)
+        save_vm_test_results(test_name, results)
         
         print(f"=== A2 测试完成，结果: {results['status']} ===")
         return results['status'] == 'PASSED'
