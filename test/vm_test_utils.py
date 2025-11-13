@@ -37,7 +37,7 @@ class VMTestConfig:
     LOG_LEVEL = logging.INFO
     
     # 项目路径（在虚拟机中）
-    PROJECT_PATH = "/home/stepuser/STEP-Project/"
+    PROJECT_PATH = "/home/stepuser/TCPclient/"
 
 class VMTestLogger:
     """虚拟机测试日志记录器"""
@@ -176,7 +176,7 @@ class VMNetworkTester:
         
         try:
             # 准备输入数据
-            input_data = f"{student_id}\n{file_path}\n"
+            input_data = f"{VMTestConfig.SERVER_IP}\n{student_id}\n{file_path}\n"
             if custom_key:
                 input_data += f"{custom_key}\n"
             else:
@@ -232,28 +232,17 @@ def save_vm_test_results(test_name, results):
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-def verify_file_integrity_vm(uploaded_filename, student_id=None):
+def verify_file_integrity_vm(local_md5, stdout):
     """在虚拟机环境中验证文件完整性"""
-    if student_id is None:
-        student_id = VMTestConfig.STUDENT_ID.replace('.', '_')
-    
-    # 本地文件路径
-    local_file_path = Path(VMTestConfig.PROJECT_PATH) / "test" / "test_data" / uploaded_filename
-    # 服务器文件路径（假设服务器有相同的项目结构）
-    server_file_path = Path(VMTestConfig.PROJECT_PATH) / "server" / "file" / student_id / uploaded_filename
-    
+   
     try:
-        # 计算本地文件MD5
-        if local_file_path.exists():
-            local_md5 = VMFileManager.calculate_md5(local_file_path)
-        else:
-            local_md5 = None
-            
-        # 计算服务器文件MD5（需要服务器有相同的项目结构）
-        if server_file_path.exists():
-            server_md5 = VMFileManager.calculate_md5(server_file_path)
-        else:
-            server_md5 = None
+        server_md5 = None
+        lines = stdout.splitlines()
+        for line in lines:
+            # 寻找以"File MD5:"开头的行（忽略前后空格）
+            if line.strip().startswith("File MD5: "):
+                # 分割冒号，取后面的部分并去除首尾空格（处理可能的空格）
+                server_md5 = line.split(":", 1)[1].strip()
             
         if local_md5 and server_md5 and local_md5 == server_md5:
             return True, local_md5, server_md5
