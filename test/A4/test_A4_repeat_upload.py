@@ -17,7 +17,7 @@ from datetime import datetime
 project_path = Path("/home/stepuser/STEP-Project/")
 sys.path.insert(0, str(project_path))
 
-from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results, verify_file_integrity_vm
+from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results, verify_file_integrity_vm
 
 def main():
     print("=== A4 测试：重复上传（相同文件名） ===")

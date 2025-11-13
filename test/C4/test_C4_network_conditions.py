@@ -19,7 +19,7 @@ from datetime import datetime
 project_path = Path("/home/stepuser/STEP-Project/")
 sys.path.insert(0, str(project_path))
 
-from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
+from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
 
 def test_under_simulated_conditions(condition_type, parameters, test_file, logger):
     """在模拟的网络条件下测试上传"""

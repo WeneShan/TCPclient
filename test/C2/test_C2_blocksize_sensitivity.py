@@ -18,7 +18,7 @@ from datetime import datetime
 project_path = Path("/home/stepuser/STEP-Project/")
 sys.path.insert(0, str(project_path))
 
-from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
+from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
 
 def main():
     print("=== C2 测试：不同 block_size 的影响（应用层参数敏感性） ===")

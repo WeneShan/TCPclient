@@ -170,8 +170,8 @@ class VMNetworkTester:
         client_cmd = [
             "python3", 
             str(Path(VMTestConfig.PROJECT_PATH) / "client.py"),
-            "--ip", VMTestConfig.SERVER_IP,
-            "--port", str(VMTestConfig.SERVER_PORT)
+            # "--ip", VMTestConfig.SERVER_IP,
+            # "--port", str(VMTestConfig.SERVER_PORT)
         ]
         
         try:

@@ -13,7 +13,7 @@ from datetime import datetime
 
 # 添加上级目录到路径以便导入test_utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
+from test.vm_test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
 
 def main():
     print("=== A2 测试：0字节和1字节文件上传 ===")

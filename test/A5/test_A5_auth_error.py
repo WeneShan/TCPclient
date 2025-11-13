@@ -17,7 +17,7 @@ from datetime import datetime
 project_path = Path("/home/stepuser/STEP-Project/")
 sys.path.insert(0, str(project_path))
 
-from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
+from test.vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
 
 def main():
     print("=== A5 测试：认证错误（错误密码） ===")
