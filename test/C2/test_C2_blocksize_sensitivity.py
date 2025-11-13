@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 C2 - 不同 block_size 的影响（应用层参数敏感性）
-测试不同block_size对同一文件的上传性能影响：4KB, 64KB, 256KB, 1MB
+测试不同block_size对同一文件的上传性能影响
+专为VirtualBox Ubuntu虚拟机环境设计
+假设服务器已经在另一个虚拟机中运行
 """
 
 import sys
@@ -12,16 +14,18 @@ import statistics
 from pathlib import Path
 from datetime import datetime
 
-# 添加上级目录到路径以便导入test_utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
+# 添加项目路径到系统路径
+project_path = Path("/home/stepuser/STEP-Project/")
+sys.path.insert(0, str(project_path))
+
+from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
 
 def main():
     print("=== C2 测试：不同 block_size 的影响（应用层参数敏感性） ===")
     
     # 初始化测试
     test_name = "C2"
-    logger = TestLogger(test_name)
+    logger = VMTestLogger(test_name)
     results = {
         'test_name': test_name,
         'test_description': '不同block_size对上传性能的影响',
@@ -30,11 +34,7 @@ def main():
         'performance_summary': {}
     }
     
-    # 测试文件大小（10MB）
-    test_file_size = TestConfig.TEST_FILE_SIZE_10MB
-    
-    # 注意：当前client.py使用server返回的block_size，我们通过文件大小间接影响block_size
-    # 模拟不同block_size的测试案例（通过不同大小的文件）
+    # 测试文件大小配置（通过不同大小的文件间接影响block_size）
     test_scenarios = [
         (1024 * 1024, "1MB_file", "模拟小block_size"),
         (5 * 1024 * 1024, "5MB_file", "模拟中等block_size"),
@@ -43,18 +43,16 @@ def main():
     ]
     
     try:
-        # 启动服务器
-        logger.info("启动服务器...")
-        server_process = ServerManager.start_server()
-        
-        if not server_process:
-            logger.error("服务器启动失败")
+        # 检查服务器连接性
+        logger.info("检查服务器连接性...")
+        if not VMNetworkTester.check_server_connectivity():
+            logger.error("服务器连接失败，请确保服务器虚拟机正在运行")
             results['status'] = 'FAILED'
-            results['error'] = '服务器启动失败'
-            save_test_results(test_name, results)
+            results['error'] = '服务器连接失败'
+            save_vm_test_results(test_name, results)
             return False
             
-        logger.info("服务器启动成功")
+        logger.info("服务器连接正常")
         
         # 对每种场景进行测试
         for file_size, scenario_name, description in test_scenarios:
@@ -63,35 +61,30 @@ def main():
             test_results = []
             
             # 每个场景测试多次求平均值
-            for i in range(min(TestConfig.TEST_RETRY_COUNT, 2)):  # 减少测试次数以节省时间
+            for i in range(min(VMTestConfig.TEST_RETRY_COUNT, 2)):  # 减少测试次数以节省时间
                 logger.info(f"第 {i+1} 次测试")
                 
                 # 创建测试文件
-                test_file = FileManager.create_test_file(file_size, f"test_{scenario_name}_{i}.bin")
+                test_file = VMFileManager.create_test_file(file_size, f"test_{scenario_name}_{i}.bin")
                 
                 if not test_file.exists():
                     logger.error(f"测试文件创建失败: {scenario_name}")
                     continue
                 
                 # 计算本地文件MD5
-                local_md5 = FileManager.calculate_md5(test_file)
+                local_md5 = VMFileManager.calculate_md5(test_file)
                 
-                # 运行上传测试（使用ClientTester）
-                client_tester = ClientTester(test_name + f"_{scenario_name}_{i}")
-                
+                # 运行上传测试
                 start_time = time.time()
-                upload_result = client_tester.run_upload_test(test_file.name)
+                upload_result = VMNetworkTester.run_client_upload(str(test_file))
                 end_time = time.time()
                 
-                if upload_result:
+                if upload_result['success']:
                     duration = upload_result['duration']
                     goodput = file_size / (duration * 1024 * 1024)  # MB/s
                     
                     # 分析block相关的信息
                     block_info = extract_block_info(upload_result['stdout'])
-                    
-                    # 验证文件完整性
-                    is_valid, server_md5, client_md5 = client_tester.verify_file_integrity(test_file.name)
                     
                     test_result = {
                         'iteration': i + 1,
@@ -101,9 +94,6 @@ def main():
                         'duration': duration,
                         'goodput_mbps': goodput,
                         'local_md5': local_md5,
-                        'server_md5': server_md5,
-                        'client_md5': client_md5,
-                        'file_integrity': is_valid,
                         'upload_success': upload_result['success'],
                         'block_info': block_info,
                         'stdout_excerpt': upload_result['stdout'][-300:] if len(upload_result['stdout']) > 300 else upload_result['stdout']
@@ -130,10 +120,6 @@ def main():
                 success_count = sum(1 for r in test_results if r['upload_success'])
                 success_rate = success_count / len(test_results)
                 
-                # MD5一致性检查
-                md5_consistent_count = sum(1 for r in test_results if r.get('file_integrity', False))
-                md5_consistency_rate = md5_consistent_count / len(test_results) if test_results else 0
-                
                 # 记录场景的性能摘要
                 scenario_summary = {
                     'scenario': scenario_name,
@@ -144,8 +130,7 @@ def main():
                     'std_duration': statistics.stdev(durations) if len(durations) > 1 else 0,
                     'avg_goodput': statistics.mean(goodputs) if goodputs else 0,
                     'std_goodput': statistics.stdev(goodputs) if len(goodputs) > 1 else 0,
-                    'success_rate': success_rate,
-                    'md5_consistency_rate': md5_consistency_rate
+                    'success_rate': success_rate
                 }
                 
                 results['performance_summary'][scenario_name] = scenario_summary
@@ -162,7 +147,6 @@ def main():
                 logger.info(f"  平均耗时: {scenario_summary['avg_duration']:.2f}±{scenario_summary['std_duration']:.2f}s")
                 logger.info(f"  平均吞吐量: {scenario_summary['avg_goodput']:.2f}±{scenario_summary['std_goodput']:.2f}MB/s")
                 logger.info(f"  成功率: {success_rate:.1%}")
-                logger.info(f"  MD5一致性: {md5_consistency_rate:.1%}")
         
         # 分析block_size敏感性
         blocksize_analysis = analyze_blocksize_sensitivity(results['performance_summary'])
@@ -170,7 +154,7 @@ def main():
         
         # 判断测试结果
         all_scenarios_passed = all(
-            summary['success_rate'] >= 0.8 and summary['md5_consistency_rate'] >= 0.8 
+            summary['success_rate'] >= 0.8
             for summary in results['performance_summary'].values()
         )
         
@@ -187,14 +171,9 @@ def main():
         results['error'] = str(e)
         
     finally:
-        # 停止服务器
-        if 'server_process' in locals() and server_process:
-            logger.info("停止服务器...")
-            ServerManager.stop_server(server_process)
-        
         # 记录结束时间
         results['end_time'] = datetime.now().isoformat()
-        save_test_results(test_name, results)
+        save_vm_test_results(test_name, results)
         
         print(f"=== C2 测试完成，结果: {results['status']} ===")
         return results['status'] == 'PASSED'

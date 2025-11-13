@@ -1,479 +1,231 @@
-# STEP协议测试系统
+# STEP 协议测试框架说明
 
-## 测试内容
+## 概述
 
-### A部分 - 功能性与正确性测试
+本测试框架用于验证 STEP 协议文件传输系统的功能和性能。测试已经重构为适合在 VirtualBox Ubuntu 虚拟机环境中运行。
 
-| 测试项 | 测试内容 | 目的 |
-|--------|----------|------|
-| A1 | 基线：单客户端标准文件上传 | 验证协议基础流程和MD5校验 |
-| A2 | 0字节/1字节文件上传 | 测试极小文件的处理机制 |
-| A3 | 文件大小非block_size倍数 | 验证尾块处理正确性 |
-| A4 | 重复上传/覆盖策略 | 测试服务器对重复上传的处理 |
-| A5 | 错误凭据（Token/Key错误） | 验证错误认证的错误处理 |
-| A6 | 错误块内容（传输破坏） | 测试网络异常情况下的恢复能力 |
-### B部分 - 鲁棒性
-暂缓
-### C部分 - 应用层性能测试
+## 测试架构
 
-| 测试项 | 测试内容 | 目的 |
-|--------|----------|------|
-| C1 | 不同文件大小上传耗时 | 评估协议扩展性 |
-| C2 | 不同block_size影响 | 分析参数敏感性 |
-| C3 | 并发客户端性能 | 评估多客户端并发处理能力 |
-| C4 | 恶劣网络条件成功率 | 测试网络鲁棒性 |
+### 新的测试架构
 
-## 系统要求
+测试框架已经重构，移除了对 [`test_utils.py`](test/test_utils.py:1) 中虚拟机管理功能的依赖。新的架构基于：
+
+- **服务器虚拟机**: 预配置的 Ubuntu 虚拟机，运行 STEP 服务器程序
+- **客户端虚拟机**: 运行测试程序的 Ubuntu 虚拟机  
+- **仅主机网络**: 通过 VirtualBox 仅主机网络连接
+
+### 核心组件
+
+1. **[`vm_test_utils.py`](test/vm_test_utils.py:1)** - 新的测试工具模块
+   - `VMTestConfig`: 测试配置管理
+   - `VMTestLogger`: 日志记录
+   - `VMFileManager`: 测试文件管理
+   - `VMNetworkTester`: 网络测试功能
+
+2. **测试脚本**: 所有测试现在直接使用 STEP 协议客户端进行通信
+
+## 测试分类
+
+### A系列 - 功能性测试
+
+- **[`A1/test_A1_baseline.py`](test/A1/test_A1_baseline.py:1)**: 基线测试 - 标准文件上传验证
+- **[`A2/test_A2_edge_files.py`](test/A2/test_A2_edge_files.py:1)**: 极小文件测试 - 0字节和1字节文件
+- **[`A3/test_A3_tail_block.py`](test/A3/test_A3_tail_block.py:1)**: 尾块测试 - 非整数块大小文件
+- **[`A4/test_A4_repeat_upload.py`](test/A4/test_A4_repeat_upload.py:1)**: 重复上传测试 - 同名文件处理
+- **[`A5/test_A5_auth_error.py`](test/A5/test_A5_auth_error.py:1)**: 认证错误测试 - 无效凭证处理
+- **[`A6/test_A6_corrupt_block.py`](test/A6/test_A6_corrupt_block.py:1)**: 块损坏测试 - 重传机制验证
+
+### C系列 - 性能测试
+
+- **[`C1/test_C1_file_size_performance.py`](test/C1/test_C1_file_size_performance.py:1)**: 文件大小性能测试
+- **[`C2/test_C2_blocksize_sensitivity.py`](test/C2/test_C2_blocksize_sensitivity.py:1)**: 块大小敏感性测试
+- **[`C3/test_C3_concurrency_performance.py`](test/C3/test_C3_concurrency_performance.py:1)**: 并发性能测试
+- **[`C4/test_C4_network_conditions.py`](test/C4/test_C4_network_conditions.py:1)**: 网络条件测试
+
+## 环境要求
 
 ### 硬件要求
-
-- **CPU**: 支持虚拟化技术的处理器
-- **内存**: 至少4GB RAM（推荐8GB或更多）
-- **存储**: 至少20GB可用磁盘空间
-- **网络**: 支持Host-only网络配置
+- Windows 11 主机系统
+- VirtualBox 6.1 或更高版本
+- 至少 8GB RAM
+- 20GB 可用磁盘空间
 
 ### 软件要求
+- 两台 Ubuntu 22.04 虚拟机
+- Python 3.8+
+- 项目依赖包 (参见 [`requirements.txt`](../requirements.txt:1))
 
-- **主机操作系统**: Linux/Windows/macOS
-- **VirtualBox**: 6.0或更高版本
-- **Ubuntu ISO**: 22.04 LTS或更高版本（用于虚拟机）
-- **Python**: 3.7或更高版本
+### 网络配置
+- 服务器虚拟机: 192.168.100.2
+- 客户端虚拟机: 192.168.100.3
+- 仅主机网络适配器
 
-## 安装与配置
+## 测试执行
 
-### 1. VirtualBox环境设置
+### 前提条件
 
-#### 自动化设置（推荐）
+1. **服务器配置**: 服务器虚拟机必须运行 STEP 服务器
+   ```bash
+   python3 server/server.py --ip 192.168.100.2 --port 1379
+   ```
 
-```bash
-# 进入测试目录
-cd test/
+2. **网络连通性**: 客户端必须能访问服务器
+   ```bash
+   ping 192.168.100.2
+   telnet 192.168.100.2 1379
+   ```
 
-# 设置执行权限
-chmod +x virtualbox_setup.sh
+### 执行步骤
 
-# 检查VirtualBox安装状态
-./virtualbox_setup.sh check
-
-# 创建内部网络
-./virtualbox_setup.sh network
-
-# 设置完整测试环境（需要提供Ubuntu ISO路径）
-./virtualbox_setup.sh setup /path/to/ubuntu-22.04.iso
-
-# 启动所有虚拟机
-./virtualbox_setup.sh start
-```
-
-#### 手动设置（备选）
-
-如果自动化脚本无法满足需求，可以手动创建虚拟机：
-
-1. 创建4个虚拟机：
-   - 1个服务器虚拟机（1024MB内存）
-   - 3个客户端虚拟机（512MB内存）
-2. 配置Host-only网络：192.168.100.0/24
-3. 安装Ubuntu系统到每个虚拟机
-
-### 2. 测试代码部署
-
-#### 在服务器虚拟机上部署
+在客户端虚拟机中运行测试：
 
 ```bash
-# 复制服务器代码
-scp server/server.py user@192.168.100.2:~/
-scp -r test/ user@192.168.100.2:~/
-
-# 登录服务器虚拟机
-ssh user@192.168.100.2
-
-# 安装依赖和启动服务器
-sudo apt update
-sudo apt install python3 python3-pip
-cd ~
-python3 server/server.py
-```
-
-#### 在客户端虚拟机上部署
-
-```bash
-# 复制客户端代码和测试脚本
-scp client.py user@192.168.100.3:~/
-scp -r test/ user@192.168.100.3:~/
-scp -r test_data/ user@192.168.100.3:~/  # 如果需要
-
-# 登录客户端虚拟机
-ssh user@192.168.100.3
-
-# 安装依赖
-sudo apt update
-sudo apt install python3 python3-pip
-cd ~
-
-# 运行基础功能测试
+# 单个测试执行
+cd /home/stepuser/STEP-Project/
 python3 test/A1/test_A1_baseline.py
 
-# 运行所有功能测试
-for test_dir in A*; do
-    python3 "test/${test_dir}/"*.py
-done
+# 批量测试执行
+chmod +x test/run_all_vm_tests.sh
+./test/run_all_vm_tests.sh
 ```
 
-## 测试执行指南
+### 测试结果
 
-### 基础功能测试执行
+每个测试生成：
+- `test.log`: 详细执行日志
+- `results.json`: 结构化测试结果
 
-#### A1 - 基线测试（必做）
+## 配置说明
 
-```bash
-cd test/A1/
-python3 test_A1_baseline.py
+### 测试配置
+
+主要配置在 [`VMTestConfig`](test/vm_test_utils.py:15) 类中：
+
+```python
+SERVER_IP = "192.168.100.2"      # 服务器IP地址
+SERVER_PORT = 1379               # 服务器端口
+STUDENT_ID = "testuser123"       # 测试用户名
+LOG_LEVEL = logging.INFO         # 日志级别
 ```
 
-**预期结果**: 
-- 文件上传成功
-- MD5校验一致
-- 测试日志显示完整的协议流程
+### 文件配置
 
-#### A2 - 极小文件测试
+测试使用的文件大小定义：
 
-```bash
-cd test/A2/
-python3 test_A2_edge_files.py
+```python
+TEST_FILE_SIZE_1KB = 1024
+TEST_FILE_SIZE_100KB = 100 * 1024
+TEST_FILE_SIZE_1MB = 1024 * 1024
+TEST_FILE_SIZE_10MB = 10 * 1024 * 1024
+TEST_FILE_SIZE_50MB = 50 * 1024 * 1024
 ```
 
-**测试重点**: 0字节和1字节文件的处理机制
-
-#### A3 - 尾块处理测试
-
-```bash
-cd test/A3/
-python3 test_A3_tail_block.py
-```
-
-**测试重点**: 非对齐文件大小的尾块处理
-
-#### A4 - 重复上传测试
-
-```bash
-cd test/A4/
-python3 test_A4_repeat_upload.py
-```
-
-**测试重点**: 服务器对重复上传的处理策略（覆盖/拒绝）
-
-#### A5 - 错误凭据测试
-
-```bash
-cd test/A5/
-python3 test_A5_auth_error.py
-```
-
-**测试重点**: 认证错误的检测和错误处理
-
-#### A6 - 传输错误测试
-
-```bash
-cd test/A6/
-python3 test_A6_corrupt_block.py
-```
-
-**测试重点**: 网络中断和传输错误的恢复能力
-
-### 性能测试执行
-
-#### C1 - 文件大小扩展性测试
-
-```bash
-cd test/C1/
-python3 test_C1_file_size_performance.py
-```
-
-**测试内容**: 1KB, 100KB, 1MB, 10MB, 50MB文件的性能
-**测试时长**: 约30-60分钟（取决于网络条件）
-
-#### C2 - block_size敏感性测试
-
-```bash
-cd test/C2/
-python3 test_C2_blocksize_sensitivity.py
-```
-
-**测试内容**: 不同文件大小对应的block_size效果
-**测试时长**: 约20-40分钟
-
-#### C3 - 并发性能测试
-
-```bash
-cd test/C3/
-python3 test_C3_concurrency_performance.py
-```
-
-**测试内容**: 1、2、4个客户端并发上传
-**测试时长**: 约15-30分钟
-
-#### C4 - 网络鲁棒性测试
-
-```bash
-cd test/C4/
-sudo python3 test_C4_network_conditions.py
-```
-
-**注意**: 需要sudo权限来使用tc命令模拟网络条件
-**测试内容**: 带宽限制、延迟、丢包情况下的性能
-
-## 网络条件模拟
-
-### 使用tc命令（Linux虚拟机内）
-
-```bash
-# 限制带宽到1Mbps
-sudo tc qdisc add dev eth0 root handle 1: tbf rate 1mbit burst 32kbit latency 400ms
-
-# 添加200ms延迟
-sudo tc qdisc add dev eth0 root netem delay 200ms
-
-# 添加1%丢包
-sudo tc qdisc add dev eth0 root netem loss 1%
-
-# 清除网络条件
-sudo tc qdisc del dev eth0 root
-
-# 查看当前网络配置
-sudo tc qdisc show dev eth0
-```
-
-### 使用脚本自动化
-
-```bash
-# 使用创建的网络控制脚本
-./STEP-Server_network_setup.sh limit    # 限制带宽
-./STEP-Server_network_setup.sh delay 200 # 添加200ms延迟
-./STEP-Server_network_setup.sh loss 1    # 添加1%丢包
-./STEP-Server_network_setup.sh clear     # 清除条件
-./STEP-Server_network_setup.sh status    # 查看状态
-```
-
-## 测试结果分析
-
-### 结果文件位置
-
-测试完成后，结果文件保存在各测试目录中：
-
-```
-test/
-├── A1/
-│   ├── test.log          # 详细测试日志
-│   └── results.json      # 结构化测试结果
-├── A2/
-├── A3/
-├── C1/
-│   ├── test.log
-│   ├── results.json
-│   └── performance_summary.json  # 性能摘要
-└── ...
-```
+## 结果分析
 
 ### 结果文件格式
 
-#### results.json 格式
+每个测试目录中的 `results.json` 包含：
 
 ```json
 {
-  "test_name": "A1",
-  "test_description": "基线：单客户端标准文件上传",
-  "start_time": "2023-12-01T10:00:00",
-  "end_time": "2023-12-01T10:05:30",
-  "status": "PASSED|FAILED",
-  "final_result": "测试结果描述",
+  "test_name": "测试标识",
+  "test_description": "测试描述",
+  "start_time": "开始时间",
+  "end_time": "结束时间",
+  "status": "PASSED/FAILED",
+  "final_result": "测试结果摘要",
   "test_cases": [
     {
-      "name": "A1_Baseline_Upload",
-      "file_size": 10485760,
-      "duration": 12.34,
-      "local_md5": "abc123...",
-      "server_md5": "abc123...",
-      "file_integrity": true,
-      "upload_success": true
+      "name": "测试用例名称",
+      "file_size": 文件大小,
+      "duration": 执行时间,
+      "local_md5": "本地文件MD5",
+      "server_md5": "服务器文件MD5", 
+      "file_integrity": true/false,
+      "upload_success": true/false
     }
   ]
 }
 ```
 
-### 性能指标分析
+### 性能指标
 
-#### 吞吐量计算
+性能测试额外包含：
 
-```bash
-# goodput (MB/s) = 文件大小 / 传输时间
-goodput = file_size / (duration * 1024 * 1024)
-```
-
-#### 成功率统计
-
-```bash
-success_rate = successful_uploads / total_uploads
-```
-
-#### 公平性评估
-
-```bash
-fairness_ratio = min_goodput / max_goodput
+```json
+{
+  "performance_metrics": {
+    "throughput_mbps": 吞吐量,
+    "concurrent_clients": 并发客户端数,
+    "average_latency": 平均延迟,
+    "success_rate": 成功率
+  }
+}
 ```
 
 ## 故障排除
 
 ### 常见问题
 
-#### 1. 虚拟机无法启动
+1. **服务器连接失败**
+   - 检查服务器是否运行
+   - 验证网络配置
+   - 确认防火墙设置
 
-**原因**: VirtualBox未正确安装或配置
-**解决方案**:
-```bash
-# 检查VirtualBox安装
-VBoxManage --version
+2. **文件上传失败**  
+   - 检查服务器磁盘空间
+   - 验证文件权限
+   - 查看服务器日志
 
-# 检查虚拟化支持
-egrep -c '(vmx|svm)' /proc/cpuinfo
-```
-
-#### 2. 网络连接失败
-
-**原因**: Host-only网络未正确配置
-**解决方案**:
-```bash
-# 重置网络配置
-./virtualbox_setup.sh cleanup
-./virtualbox_setup.sh network
-```
-
-#### 3. 测试脚本权限错误
-
-**解决方案**:
-```bash
-chmod +x *.py
-chmod +x *.sh
-```
-
-#### 4. Python模块缺失
-
-**解决方案**:
-```bash
-pip3 install pathlib statistics concurrent.futures
-```
+3. **MD5 校验失败**
+   - 检查网络稳定性
+   - 验证文件系统完整性
+   - 重新运行测试
 
 ### 调试模式
 
-启用详细日志记录：
+启用详细日志：
 
 ```python
-# 在test_utils.py中设置
-TestConfig.LOG_LEVEL = logging.DEBUG
+# 修改 vm_test_utils.py
+VMTestConfig.LOG_LEVEL = logging.DEBUG
 ```
 
-### 性能问题诊断
+## 文件说明
 
-#### 检查CPU和内存使用
+### 保留的文件
 
-```bash
-# 在服务器端
-top -p $(pgrep python3)
+- **测试脚本**: 所有 `test_*.py` 文件
+- **工具模块**: [`vm_test_utils.py`](test/vm_test_utils.py:1)
+- **测试数据**: `test_data/` 目录
+- **配置文档**: [`VirtualBox_Ubuntu_Test_Guide.md`](test/VirtualBox_Ubuntu_Test_Guide.md:1)
+- **结果收集**: [`collect_results.py`](test/collect_results.py:1)
 
-# 在客户端
-ps aux | grep client.py
-```
+### 已移除的文件
 
-#### 检查网络流量
+- 旧的虚拟机管理工具 [`test_utils.py`](test/test_utils.py:1)
+- Windows 批处理脚本 (已由 shell 脚本替代)
+- 过时的配置文档
 
-```bash
-# 使用tcpdump抓包
-sudo tcpdump -i eth0 host 192.168.100.2
-```
+## 扩展开发
 
-## 测试报告生成
+### 添加新测试
 
-### 自动化报告生成
+1. 创建测试脚本文件
+2. 导入 [`vm_test_utils`](test/vm_test_utils.py:1) 模块
+3. 遵循现有的测试结构
+4. 保存结果到 `results.json`
 
-```bash
-# 使用统一的结果收集脚本
-python3 test/collect_results.py
+### 自定义配置
 
-# 生成HTML报告
-python3 test/generate_report.py --format html
-```
+通过修改 [`VMTestConfig`](test/vm_test_utils.py:15) 类或创建子类来自定义测试行为。
 
-### 手动分析
+## 版本历史
 
-1. **功能测试结果**:
-   - 查看各A1-A6目录下的results.json
-   - 检查PASSED/FAILED状态
-   - 分析失败原因
+- **v2.0**: 重构为虚拟机专用测试框架
+- **v1.0**: 原始测试框架（已弃用）
 
-2. **性能测试结果**:
-   - 分析C1-C4目录下的performance_summary.json
-   - 绘制性能趋势图
-   - 识别性能瓶颈
+---
 
-3. **综合评估**:
-   - 对比不同测试场景的结果
-   - 评估协议在各种条件下的表现
-   - 提出改进建议
-
-## 最佳实践
-
-### 测试执行顺序
-
-1. **优先执行**: A1基础功能测试
-2. **功能验证**: A2-A6功能测试
-3. **性能基准**: C1文件大小测试
-4. **参数优化**: C2 block_size测试
-5. **扩展性测试**: C3并发测试
-6. **鲁棒性测试**: C4网络条件测试
-
-### 数据收集建议
-
-- **多次测试**: 每个配置至少运行3次
-- **基准记录**: 在理想条件下记录性能基准
-- **对比分析**: 对比不同配置下的性能差异
-- **错误日志**: 保留详细的错误日志用于分析
-
-### 测试环境维护
-
-- **定期清理**: 清理临时文件和日志
-- **配置备份**: 保存成功的测试配置
-- **版本控制**: 对测试脚本进行版本管理
-
-## 扩展与定制
-
-### 添加新测试用例
-
-1. 在相应目录下创建测试脚本
-2. 继承TestConfig和TestLogger基类
-3. 遵循现有的结果保存格式
-4. 更新本README文档
-
-### 自定义网络条件
-
-修改`test_C4_network_conditions.py`中的`test_conditions`配置：
-
-```python
-test_conditions = [
-    {'type': 'custom_condition', 'name': '自定义条件', 'parameters': {...}}
-]
-```
-
-### 性能监控扩展
-
-可以添加系统资源监控：
-
-```python
-import psutil
-
-def monitor_system_resources():
-    return {
-        'cpu_percent': psutil.cpu_percent(),
-        'memory_percent': psutil.virtual_memory().percent,
-        'disk_io': psutil.disk_io_counters()
-    }
-```
-
+*最后更新: 2024年1月*
+*版本: 2.0*

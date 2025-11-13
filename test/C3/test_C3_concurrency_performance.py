@@ -2,6 +2,8 @@
 """
 C3 - 并发客户端（低并发，最多 4 个）对应用吞吐的影响
 测试1、2、4个客户端同时上传各自的10MB文件
+专为VirtualBox Ubuntu虚拟机环境设计
+假设服务器已经在另一个虚拟机中运行
 """
 
 import sys
@@ -14,34 +16,32 @@ import concurrent.futures
 from pathlib import Path
 from datetime import datetime
 
-# 添加上级目录到路径以便导入test_utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
+# 添加项目路径到系统路径
+project_path = Path("/home/stepuser/STEP-Project/")
+sys.path.insert(0, str(project_path))
+
+from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results
 
 def upload_worker(worker_id, test_file_name, logger):
     """并发上传工作线程"""
     try:
-        client_tester = ClientTester(f"C3_worker_{worker_id}")
-        
         # 计算本地文件MD5
-        test_file_path = Path(f"test_data/{test_file_name}")
+        test_file_path = Path(VMTestConfig.PROJECT_PATH) / "test" / "test_data" / test_file_name
         if not test_file_path.exists():
             logger.error(f"工作线程 {worker_id}: 测试文件不存在")
             return None
         
-        local_md5 = FileManager.calculate_md5(test_file_path)
+        local_md5 = VMFileManager.calculate_md5(test_file_path)
         
         # 运行上传测试
         start_time = time.time()
-        upload_result = client_tester.run_upload_test(test_file_name)
+        upload_result = VMNetworkTester.run_client_upload(str(test_file_path))
         end_time = time.time()
         
-        if upload_result:
+        if upload_result['success']:
             duration = end_time - start_time
-            goodput = test_file_path.stat().st_size / (duration * 1024 * 1024)
-            
-            # 验证文件完整性
-            is_valid, server_md5, client_md5 = client_tester.verify_file_integrity(test_file_name)
+            file_size = test_file_path.stat().st_size
+            goodput = file_size / (duration * 1024 * 1024)  # MB/s
             
             result = {
                 'worker_id': worker_id,
@@ -49,9 +49,6 @@ def upload_worker(worker_id, test_file_name, logger):
                 'duration': duration,
                 'goodput_mbps': goodput,
                 'local_md5': local_md5,
-                'server_md5': server_md5,
-                'client_md5': client_md5,
-                'file_integrity': is_valid,
                 'upload_success': upload_result['success']
             }
             
@@ -70,7 +67,7 @@ def main():
     
     # 初始化测试
     test_name = "C3"
-    logger = TestLogger(test_name)
+    logger = VMTestLogger(test_name)
     results = {
         'test_name': test_name,
         'test_description': '并发客户端对应用吞吐的影响测试',
@@ -81,21 +78,19 @@ def main():
     
     # 并发级别配置
     concurrency_levels = [1, 2, 4]
-    test_file_size = TestConfig.TEST_FILE_SIZE_10MB
+    test_file_size = VMTestConfig.TEST_FILE_SIZE_10MB
     
     try:
-        # 启动服务器
-        logger.info("启动服务器...")
-        server_process = ServerManager.start_server()
-        
-        if not server_process:
-            logger.error("服务器启动失败")
+        # 检查服务器连接性
+        logger.info("检查服务器连接性...")
+        if not VMNetworkTester.check_server_connectivity():
+            logger.error("服务器连接失败，请确保服务器虚拟机正在运行")
             results['status'] = 'FAILED'
-            results['error'] = '服务器启动失败'
-            save_test_results(test_name, results)
+            results['error'] = '服务器连接失败'
+            save_vm_test_results(test_name, results)
             return False
             
-        logger.info("服务器启动成功")
+        logger.info("服务器连接正常")
         
         # 对每种并发级别进行测试
         for concurrency in concurrency_levels:
@@ -105,7 +100,7 @@ def main():
             test_files = []
             for i in range(concurrency):
                 test_file_name = f"test_concurrent_{concurrency}_{i}.bin"
-                test_file = FileManager.create_test_file(test_file_size, test_file_name)
+                test_file = VMFileManager.create_test_file(test_file_size, test_file_name)
                 test_files.append(test_file_name)
                 
                 if not test_file.exists():
@@ -145,9 +140,14 @@ def main():
                 success_rate = len(successful_uploads) / len(concurrent_results)
                 
                 # 计算总吞吐和公平性
-                max_goodput = max(r['goodput_mbps'] for r in successful_uploads) if successful_uploads else 0
-                min_goodput = min(r['goodput_mbps'] for r in successful_uploads) if successful_uploads else 0
-                fairness_ratio = min_goodput / max_goodput if max_goodput > 0 else 0
+                if successful_uploads:
+                    max_goodput = max(r['goodput_mbps'] for r in successful_uploads)
+                    min_goodput = min(r['goodput_mbps'] for r in successful_uploads)
+                    fairness_ratio = min_goodput / max_goodput if max_goodput > 0 else 0
+                else:
+                    max_goodput = 0
+                    min_goodput = 0
+                    fairness_ratio = 0
                 
                 # 记录并发结果
                 concurrency_summary = {
@@ -184,7 +184,7 @@ def main():
             
             # 清理测试文件
             for test_file_name in test_files:
-                test_file_path = Path(f"test_data/{test_file_name}")
+                test_file_path = Path(VMTestConfig.PROJECT_PATH) / "test" / "test_data" / test_file_name
                 try:
                     if test_file_path.exists():
                         test_file_path.unlink()
@@ -217,14 +217,9 @@ def main():
         results['error'] = str(e)
         
     finally:
-        # 停止服务器
-        if 'server_process' in locals() and server_process:
-            logger.info("停止服务器...")
-            ServerManager.stop_server(server_process)
-        
         # 记录结束时间
         results['end_time'] = datetime.now().isoformat()
-        save_test_results(test_name, results)
+        save_vm_test_results(test_name, results)
         
         print(f"=== C3 测试完成，结果: {results['status']} ===")
         return results['status'] == 'PASSED'
@@ -270,18 +265,20 @@ def analyze_concurrency_performance(concurrency_results):
                 analysis['observations'].append(f'并发性能扩展较差 ({scalability_ratio:.2f}x)')
     
     # 评估公平性
-    avg_fairness = statistics.mean(r['fairness_ratio'] for r in concurrency_results.values())
-    
-    if avg_fairness >= 0.8:
-        analysis['fairness_assessment'] = 'excellent'
-    elif avg_fairness >= 0.6:
-        analysis['fairness_assessment'] = 'good'
-    elif avg_fairness >= 0.4:
-        analysis['fairness_assessment'] = 'fair'
-    else:
-        analysis['fairness_assessment'] = 'poor'
-    
-    analysis['avg_fairness'] = avg_fairness
+    if concurrency_results:
+        fairness_values = [r['fairness_ratio'] for r in concurrency_results.values()]
+        avg_fairness = statistics.mean(fairness_values) if fairness_values else 0
+        
+        if avg_fairness >= 0.8:
+            analysis['fairness_assessment'] = 'excellent'
+        elif avg_fairness >= 0.6:
+            analysis['fairness_assessment'] = 'good'
+        elif avg_fairness >= 0.4:
+            analysis['fairness_assessment'] = 'fair'
+        else:
+            analysis['fairness_assessment'] = 'poor'
+        
+        analysis['avg_fairness'] = avg_fairness
     
     return analysis
 

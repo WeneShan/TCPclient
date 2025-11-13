@@ -212,3 +212,5 @@ server/data/
 server/file/
 server/log/
 server/tmp/
+test/test_data
+/test/*/results.json

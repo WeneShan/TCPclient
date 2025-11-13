@@ -50,21 +50,7 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 # 进入测试目录
 cd test/
-
-# 设置执行权限
-chmod +x virtualbox_setup.sh
-
-# 检查VirtualBox安装状态
-./virtualbox_setup.sh check
-
-# 创建内部网络
-./virtualbox_setup.sh network
-
-# 设置完整测试环境（需要提供Ubuntu ISO路径）
-./virtualbox_setup.sh setup /path/to/ubuntu-22.04.iso
-
-# 启动所有虚拟机
-./virtualbox_setup.sh start
+ 
 ```
 
 ## 致谢

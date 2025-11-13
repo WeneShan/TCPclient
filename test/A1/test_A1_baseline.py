@@ -2,6 +2,8 @@
 """
 A1 - 基线：单客户端标准文件上传（基本功能）
 验证STEP协议的基础流程：Token、申请上传、分块、完成、MD5校验
+专为VirtualBox Ubuntu虚拟机环境设计
+假设服务器已经在另一个虚拟机中运行
 """
 
 import sys
@@ -11,17 +13,18 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# 添加上级目录到路径以便导入test_utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from test_utils import TestConfig, TestLogger, FileManager, ServerManager, ClientTester, save_test_results
+# 添加项目路径到系统路径
+project_path = Path("/home/stepuser/STEP-Project/")
+sys.path.insert(0, str(project_path))
+
+from vm_test_utils import VMTestConfig, VMTestLogger, VMFileManager, VMNetworkTester, save_vm_test_results, verify_file_integrity_vm
 
 def main():
     print("=== A1 测试：基线单客户端标准文件上传 ===")
     
     # 初始化测试
     test_name = "A1"
-    logger = TestLogger(test_name)
-    client_tester = ClientTester(test_name)
+    logger = VMTestLogger(test_name)
     results = {
         'test_name': test_name,
         'test_description': '基线：单客户端标准文件上传（基本功能）',
@@ -30,23 +33,21 @@ def main():
     }
     
     try:
-        # 启动服务器
-        logger.info("启动服务器...")
-        server_process = ServerManager.start_server()
-        
-        if not server_process:
-            logger.error("服务器启动失败")
+        # 检查服务器连接性
+        logger.info("检查服务器连接性...")
+        if not VMNetworkTester.check_server_connectivity():
+            logger.error("服务器连接失败，请确保服务器虚拟机正在运行")
             results['status'] = 'FAILED'
-            results['error'] = '服务器启动失败'
-            save_test_results(test_name, results)
+            results['error'] = '服务器连接失败'
+            save_vm_test_results(test_name, results)
             return False
             
-        logger.info("服务器启动成功")
+        logger.info("服务器连接正常")
         
         # 创建10MB测试文件
         logger.info("创建10MB测试文件...")
-        test_file = FileManager.create_test_file(
-            TestConfig.TEST_FILE_SIZE_10MB, 
+        test_file = VMFileManager.create_test_file(
+            VMTestConfig.TEST_FILE_SIZE_10MB, 
             "test_10mb.bin"
         )
         
@@ -54,32 +55,32 @@ def main():
             logger.error("测试文件创建失败")
             results['status'] = 'FAILED'
             results['error'] = '测试文件创建失败'
-            save_test_results(test_name, results)
+            save_vm_test_results(test_name, results)
             return False
         
         # 计算本地文件MD5
-        local_md5 = FileManager.calculate_md5(test_file)
+        local_md5 = VMFileManager.calculate_md5(test_file)
         logger.info(f"本地文件MD5: {local_md5}")
         
         # 运行上传测试
         logger.info("开始文件上传...")
-        test_result = client_tester.run_upload_test("test_10mb.bin")
+        test_result = VMNetworkTester.run_client_upload(str(test_file))
         
-        if not test_result:
+        if not test_result['success']:
             logger.error("上传测试执行失败")
             results['status'] = 'FAILED'
             results['error'] = '上传测试执行失败'
-            save_test_results(test_name, results)
+            save_vm_test_results(test_name, results)
             return False
         
         # 验证文件完整性
         logger.info("验证文件完整性...")
-        is_valid, server_md5_calc, client_md5_calc = client_tester.verify_file_integrity("test_10mb.bin")
+        is_valid, server_md5_calc, client_md5_calc = verify_file_integrity_vm("test_10mb.bin")
         
         # 记录测试用例结果
         test_case = {
             'name': 'A1_Baseline_Upload',
-            'file_size': test_result['file_size'],
+            'file_size': test_file.stat().st_size,
             'duration': test_result['duration'],
             'local_md5': local_md5,
             'server_md5': server_md5_calc,
@@ -105,6 +106,7 @@ def main():
             
             if not test_result['success']:
                 logger.error(f"上传失败，返回码: {test_result['return_code']}")
+                logger.error(f"错误输出: {test_result['stderr']}")
             if not is_valid:
                 logger.error("文件完整性验证失败")
         
@@ -114,11 +116,6 @@ def main():
         results['error'] = str(e)
         
     finally:
-        # 停止服务器
-        if 'server_process' in locals() and server_process:
-            logger.info("停止服务器...")
-            ServerManager.stop_server(server_process)
-        
         # 清理测试文件
         if 'test_file' in locals() and test_file.exists():
             try:
@@ -129,7 +126,7 @@ def main():
         
         # 记录结束时间
         results['end_time'] = datetime.now().isoformat()
-        save_test_results(test_name, results)
+        save_vm_test_results(test_name, results)
         
         print(f"=== A1 测试完成，结果: {results['status']} ===")
         return results['status'] == 'PASSED'
