@@ -7,7 +7,6 @@ import os
 import time
 import sys
 import mmap
-from multiprocessing import Process, Queue
 
 # 协议常量定义（与服务器保持一致）
 OP_SAVE, OP_DELETE, OP_GET, OP_UPLOAD, OP_DOWNLOAD, OP_BYE, OP_LOGIN, OP_ERROR = (
@@ -207,41 +206,15 @@ class AuthenticationService:
         return self.token
 
 
-# 文件块处理模块，负责单线程文件读取和索引计算
+# 文件块处理模块，负责单线程文件读取
 class FileBlockProcessor:
-    """Handles file block processing including single-thread reading and index calculation"""
+    """Handles file block processing for single-thread reading"""
 
     @staticmethod
-    def calculate_indices(process_num, total_blocks):
-        """
-        Calculate block index ranges for each process
-        :param process_num: Number of processes
-        :param total_blocks: Total number of blocks
-        :return: Tuple of dictionaries containing start and end indices for each process
-        """
-        blocks_per_process = total_blocks // process_num
-        start_indices = {}
-        end_indices = {}
-
-        for i in range(1, process_num + 1):
-            if i == 1:
-                start_indices[f'process_{i}'] = 0
-                end_indices[f'process_{i}'] = blocks_per_process - 1
-            elif i == process_num:
-                start_indices[f'process_{i}'] = (i - 1) * blocks_per_process
-                end_indices[f'process_{i}'] = total_blocks - 1
-            else:
-                start_indices[f'process_{i}'] = (i - 1) * blocks_per_process
-                end_indices[f'process_{i}'] = i * blocks_per_process - 1
-
-        return start_indices, end_indices
-
-    @staticmethod
-    def read_blocks_single_thread(start_idx, end_idx, block_size, file_path, file_size):
+    def read_blocks_single_thread(total_blocks, block_size, file_path, file_size):
         """
         单线程读取文件块
-        :param start_idx: 起始块索引
-        :param end_idx: 结束块索引
+        :param total_blocks: 总块数（从服务器获取）
         :param block_size: 块大小
         :param file_path: 文件路径
         :param file_size: 文件总大小
@@ -249,7 +222,7 @@ class FileBlockProcessor:
         """
         with open(file_path, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mapped_file:
-                for block_idx in range(start_idx, end_idx + 1):
+                for block_idx in range(total_blocks):
                     mapped_file.seek(block_idx * block_size)
                     remaining = file_size - block_idx * block_size
                     chunk_size = min(block_size, remaining)
@@ -309,7 +282,7 @@ class FileTransferService:
         self.file_key = ""
         self.file_size = 0
         self.file_name = ""
-        self.file_path = ""  # 新增：存储文件路径用于计算MD5
+        self.file_path = ""
 
     def get_upload_plan(self, file_path, custom_key=None):
         """
@@ -318,7 +291,7 @@ class FileTransferService:
         :param custom_key: Optional custom file key
         :return: True if plan retrieved successfully, False otherwise
         """
-        self.file_path = file_path  # 保存文件路径
+        self.file_path = file_path
         self.file_name = custom_key or os.path.basename(file_path)
         self.file_size = os.path.getsize(file_path)
 
@@ -362,17 +335,16 @@ class FileTransferService:
                 md5_hash.update(chunk)
         return md5_hash.hexdigest()
 
-    def upload_file(self, file_path, process_num=3):
+    def upload_file(self, file_path):
         """
         单线程上传文件，使用生成器逐块读取文件
         :param file_path: Path to the file to upload
-        :param process_num: 保留参数，用于兼容接口（实际使用单线程）
         """
         start_time = time.time()
 
-        # 使用单线程读取所有块
+        # 使用单线程读取所有块（依赖服务器返回的total_blocks）
         block_generator = FileBlockProcessor.read_blocks_single_thread(
-            0, self.total_blocks - 1, self.block_size, file_path, self.file_size
+            self.total_blocks, self.block_size, file_path, self.file_size
         )
 
         # 上传块数据
@@ -412,7 +384,7 @@ class FileTransferService:
                     break
                 except socket.timeout:
                     print(f"\nRetransmitting block {block_index} (timeout)")
-                    ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)  # Update the progress bar when retransmitting.
+                    ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)
 
             # 更新进度条
             blocks_uploaded += 1
@@ -428,7 +400,7 @@ class FileTransferService:
                 print(f'Local file MD5:  {local_md5}')
                 print(f'Server file MD5: {server_md5}')
 
-                # compare MD5 from  server
+                # compare MD5 from server
                 if local_md5 == server_md5:
                     print("MD5 verification succeeded - file transfer is intact")
                 else:
