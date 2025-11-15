@@ -8,7 +8,7 @@ import time
 import sys
 import mmap
 
-# 协议常量定义（与服务器保持一致）
+# Protocol constant definitions (consistent with the server)
 OP_SAVE, OP_DELETE, OP_GET, OP_UPLOAD, OP_DOWNLOAD, OP_BYE, OP_LOGIN, OP_ERROR = (
     'SAVE', 'DELETE', 'GET', 'UPLOAD', 'DOWNLOAD', 'BYE', 'LOGIN', "ERROR"
 )
@@ -23,7 +23,7 @@ FIELD_STATUS, FIELD_STATUS_MSG, FIELD_BLOCK_INDEX = 'status', 'status_msg', 'blo
 DIR_REQUEST, DIR_RESPONSE = 'REQUEST', 'RESPONSE'
 SERVER_PORT = 1379
 RE_TRANSMISSION_TIME = 20
-PROGRESS_BAR_LENGTH = 50  # 进度条长度
+PROGRESS_BAR_LENGTH = 50  # Length of the progress bar
 
 
 def _argparse():
@@ -39,7 +39,7 @@ def _argparse():
     return parser.parse_args()
 
 
-# 网络通信管理模块，负责数据包的打包、解析和发送
+# Network communication management module, responsible for packing, parsing, and sending data packets
 class NetworkManager:
     """Handles network communication including packet packing, parsing and sending"""
 
@@ -119,7 +119,7 @@ class NetworkManager:
         return sock.sendall(NetworkManager.pack_message(message, bin_data))
 
 
-# 错误处理模块，集中处理各类错误状态
+# Error handling module, centrally handles various error states
 class ErrorHandler:
     """Handles error checking and processing for server responses"""
 
@@ -139,7 +139,7 @@ class ErrorHandler:
             sys.exit(1)
 
 
-# 认证服务模块，处理登录和令牌管理
+# Authentication service module, handles login and token management
 class AuthenticationService:
     """Manages user authentication and token management"""
 
@@ -158,7 +158,7 @@ class AuthenticationService:
         :return: True if login successful, False otherwise
         """
         if student_id == "YeWenjie":
-            self.SendingToThreeBody()
+            self.sending_to_three_body()
             return False
 
         password = hashlib.md5(student_id.encode()).hexdigest().lower()
@@ -190,13 +190,13 @@ class AuthenticationService:
             print(f"Login error: {str(e)}")
             return False
 
-    def SendingToThreeBody(self):
+    def sending_to_three_body(self):
         """A rudimentary server-side Easter egg collection mechanism """
         three_body_json = {FIELD_DIRECTION: DIR_EARTH}
         self.socket.send(NetworkManager.pack_message(three_body_json))
         response, _ = NetworkManager.unpack_message(self.socket)
         if response:
-            print(f"receive from ThreeBody: {response.get(FIELD_STATUS_MSG)}")
+            print(f"Received from ThreeBody: {response.get(FIELD_STATUS_MSG)}")
 
     def get_token(self):
         """
@@ -206,19 +206,19 @@ class AuthenticationService:
         return self.token
 
 
-# 文件块处理模块，负责单线程文件读取
+# File block processing module, responsible for single-threaded file reading
 class FileBlockProcessor:
     """Handles file block processing for single-thread reading"""
 
     @staticmethod
     def read_blocks_single_thread(total_blocks, block_size, file_path, file_size):
         """
-        单线程读取文件块
-        :param total_blocks: 总块数（从服务器获取）
-        :param block_size: 块大小
-        :param file_path: 文件路径
-        :param file_size: 文件总大小
-        :return: 包含块索引和数据的生成器
+        Read file blocks in a single thread
+        :param total_blocks: Total number of blocks (obtained from the server)
+        :param block_size: Block size
+        :param file_path: File path
+        :param file_size: Total file size
+        :return: Generator containing block index and data
         """
         with open(file_path, 'rb') as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mapped_file:
@@ -230,7 +230,7 @@ class FileBlockProcessor:
                     yield (block_idx, data)
 
 
-# 进度条工具类，实现单行动态刷新
+# Progress bar utility class, implements single-line dynamic refresh
 class ProgressBar:
     """Single-line dynamic progress bar for file upload"""
 
@@ -247,8 +247,8 @@ class ProgressBar:
         speed = (completed * 1024 * 1024) / elapsed_time if elapsed_time > 0 else 0  # MB/s
 
         # Calculate progress bar components
-        filled_length = int(PROGRESS_BAR_LENGTH * completed // total)
-        bar = '█' * filled_length + '-' * (PROGRESS_BAR_LENGTH - filled_length)
+        filled_length = int(ProgressBar.PROGRESS_BAR_LENGTH * completed // total)
+        bar = '█' * filled_length + '-' * (ProgressBar.PROGRESS_BAR_LENGTH - filled_length)
 
         # Dynamic refresh (overwrite current line)
         sys.stdout.write(
@@ -264,8 +264,10 @@ class ProgressBar:
             sys.stdout.write('\n')
             sys.stdout.flush()
 
+    PROGRESS_BAR_LENGTH = 50  # Length of the progress bar
 
-# 文件传输服务模块，处理上传计划和文件块上传
+
+# File transfer service module, handles upload planning and file block uploading
 class FileTransferService:
     """Manages file transfer operations including upload planning and block uploading"""
 
@@ -294,6 +296,12 @@ class FileTransferService:
         self.file_path = file_path
         self.file_name = custom_key or os.path.basename(file_path)
         self.file_size = os.path.getsize(file_path)
+
+        # 新增：检查文件大小是否为0字节
+        if self.file_size == 0:
+            print(f"\nError: Cannot upload 0-byte file '{self.file_name}'")
+            print("Please select a non-empty file to upload.")
+            return False
 
         payload = {
             FIELD_KEY: self.file_name,
@@ -327,37 +335,37 @@ class FileTransferService:
 
     @staticmethod
     def calculate_local_md5(file_path, block_size=8192):
-        """计算本地文件的MD5值"""
+        """Calculate the MD5 value of the local file"""
         md5_hash = hashlib.md5()
         with open(file_path, "rb") as f:
-            # 分块读取文件计算MD5，避免大文件占用过多内存
+            # Read the file in chunks to calculate MD5, avoiding excessive memory usage for large files
             while chunk := f.read(block_size):
                 md5_hash.update(chunk)
         return md5_hash.hexdigest()
 
     def upload_file(self, file_path):
         """
-        单线程上传文件，使用生成器逐块读取文件
+        Upload file in a single thread, using a generator to read file blocks one by one
         :param file_path: Path to the file to upload
         """
         start_time = time.time()
 
-        # 使用单线程读取所有块（依赖服务器返回的total_blocks）
+        # Use single-threaded mode to read all blocks (depending on total_blocks returned by the server)
         block_generator = FileBlockProcessor.read_blocks_single_thread(
             self.total_blocks, self.block_size, file_path, self.file_size
         )
 
-        # 上传块数据
+        # Upload block data
         self._upload_blocks_from_generator(block_generator, start_time)
 
     def _upload_blocks_from_generator(self, block_generator, start_time):
         """
-        从生成器上传文件块，支持超时重传和动态进度条
-        :param block_generator: 生成器，产生(block_index, data)元组
-        :param start_time: 上传开始时间戳
+        Upload file blocks from a generator, supporting timeout retransmission and dynamic progress bar
+        :param block_generator: Generator that yields (block_index, data) tuples
+        :param start_time: Timestamp when the upload starts
         """
         blocks_uploaded = 0
-        last_server_msg = ""  # 存储最后一条服务器响应，避免频繁打印
+        last_server_msg = ""  # Store the last server response to avoid frequent printing
 
         for block_index, bin_data in block_generator:
             payload = {
@@ -365,7 +373,7 @@ class FileTransferService:
                 FIELD_BLOCK_INDEX: block_index
             }
 
-            # 处理重传
+            # Handle retransmission
             while True:
                 try:
                     NetworkManager.send_message(
@@ -386,13 +394,13 @@ class FileTransferService:
                     print(f"\nRetransmitting block {block_index} (timeout)")
                     ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)
 
-            # 更新进度条
+            # Update progress bar
             blocks_uploaded += 1
             ProgressBar.update(blocks_uploaded, self.total_blocks, start_time)
 
-            # 检查是否完成（收到MD5）
+            # Check if completed (MD5 received)
             if FIELD_MD5 in response:
-                # calculate local MD5 in order to compare with server
+                # Calculate local MD5 to compare with server
                 local_md5 = self.calculate_local_md5(self.file_path)
                 server_md5 = response[FIELD_MD5]
 
@@ -400,7 +408,7 @@ class FileTransferService:
                 print(f'Local file MD5:  {local_md5}')
                 print(f'Server file MD5: {server_md5}')
 
-                # compare MD5 from server
+                # Compare MD5 from server
                 if local_md5 == server_md5:
                     print("MD5 verification succeeded - file transfer is intact")
                 else:
@@ -410,12 +418,12 @@ class FileTransferService:
                 print(last_server_msg)
                 break
 
-        # 如果没有在循环中打印完成信息，则打印最后的服务器消息
+        # If completion message wasn't printed in the loop, print the last server message
         if FIELD_MD5 not in locals().get('response', {}):
             print(f'\n{last_server_msg}')
 
 
-# 主客户端类，协调各模块工作
+# Main client class, coordinates the work of various modules
 class STEPFileClient:
     """Main client class coordinating authentication and file transfer services"""
 
@@ -516,8 +524,14 @@ if __name__ == "__main__":
             client.close()
             sys.exit(0)
         if os.path.exists(input_path) and os.path.isfile(input_path):
+            # 新增：检查文件大小是否为0字节
+            file_size = os.path.getsize(input_path)
+            if file_size == 0:
+                print(f"Error: Cannot upload 0-byte file '{os.path.basename(input_path)}'")
+                print("Please select a non-empty file.")
+                continue
             file_path = input_path
-            print(f"Valid file: {file_path}")
+            print(f"Valid file: {file_path} (Size: {file_size} bytes)")
             break
         else:
             print(f"Invalid path: '{input_path}' (not a file or does not exist)")
